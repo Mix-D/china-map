@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <script src="https://unpkg.com/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+    <meta charset="UTF-8">
+    <title>中国省级行政区地图</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3B82F6',
+                        secondary: '#10B981',
+                        accent: '#8B5CF6',
+                        dark: {
+                            primary: '#60a5fa',
+                            secondary: '#34d399',
+                            accent: '#a78bfa',
+                            bg: '#111827',
+                            panel: '#1f2937',
+                            text: '#f3f4f6'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 min-h-screen dark:bg-gray-900">
+    <div class="container mx-auto p-4">
+        <header class="mb-8 text-center">
+            <div class="absolute top-4 right-4 flex items-center space-x-2">
+                <span class="text-sm font-medium text-gray-600 dark:text-gray-300">浅色</span>
+                <button id="theme-toggle" class="relative w-14 h-7 rounded-full bg-gray-300 dark:bg-blue-600 transition-colors">
+                    <div id="theme-toggle-handle" class="absolute top-1 left-1 w-5 h-5 rounded-full bg-white shadow-md transform transition-transform"></div>
+                </button>
+                <span class="text-sm font-medium text-gray-600 dark:text-gray-300">深色</span>
+            </div>
+
+            <h1 class="text-[clamp(1.8rem,3vw,2.5rem)] font-bold text-gray-800 dark:text-white">中国省级行政区地图</h1>
+            <p class="text-gray-600 dark:text-gray-300 mt-2">点击或悬停查看各省详情</p>
+
+            <!-- 修复公告栏 -->
+            <!-- 公告栏 -->
+            <div class="relative mt-4 bg-blue-50 border border-blue-200 rounded-lg dark:bg-blue-900/30 dark:border-blue-800 h-10">
+                <div id="announcement-bar" class="flex items-center h-full cursor-pointer overflow-hidden" onclick="showAnnouncementModal()">
+                    <div class="flex-shrink-0 mx-3 text-blue-600 dark:text-blue-300">
+                        <i class="fa fa-bullhorn text-lg"></i>
+                    </div>
+                    <div class="flex-grow overflow-hidden">
+                        <div class="animate-marquee whitespace-nowrap text-blue-800 dark:text-blue-200">
+                            欢迎来到中国省份行政图0.8 - 新增深色模式、省份信息展示和交互功能！
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            <div class="lg:col-span-3 bg-white rounded-xl shadow-lg overflow-hidden">
+                <div id="map" class="w-full h-[600px]"></div>
+            </div>
+
+            <div id="info-panel" class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 h-[600px] overflow-y-auto">
+                <h2 class="text-xl font-bold text-gray-800 dark:text-gray-200 mb-4">省份详情</h2>
+                <div id="province-info" class="space-y-4 text-gray-600 dark:text-gray-300">
+                    <div class="text-gray-500 dark:text-gray-400 italic">请点击地图上的省份</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="announcement-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 overflow-hidden transform transition-all">
+            <div class="bg-blue-500 text-white p-4 flex justify-between items-center">
+                <h3 class="font-bold text-lg">公告信息</h3>
+                <button onclick="hideAnnouncementModal()" class="text-white hover:text-blue-100 transition-colors">
+                    <i class="fa fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                <p class="text-gray-700 dark:text-gray-300">欢迎来到中国省份行政图0.8版本！本版本新增了以下功能：</p>
+                <ul class="mt-4 list-disc list-inside text-gray-600 dark:text-gray-300 space-y-1">
+                    <li>修复了部分省份信息显示不完整的问题</li>
+                    <li>提升了地图交互的流畅度</li>
+                    <li>添加了深色/浅色主题</li>
+                    <li>优化了公告栏滚动效果</li>
+                </ul>
+                <p class="mt-4 text-gray-700 dark:text-gray-300">感谢您的使用！</p>
+            </div>
+            <div class="bg-gray-50 dark:bg-gray-700 p-4 flex justify-end">
+                <button onclick="hideAnnouncementModal()" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded transition-colors">
+                    我知道了
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script defer>
+        // =============== 主题切换功能 ===============
+        const themeToggle = document.getElementById('theme-toggle');
+        const themeToggleHandle = document.getElementById('theme-toggle-handle');
+
+        const userTheme = localStorage.getItem('theme');
+        const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+        if (userTheme === 'dark' || (!userTheme && systemTheme)) {
+            document.documentElement.classList.add('dark');
+            themeToggleHandle.style.transform = 'translateX(28px)';
+        } else {
+            document.documentElement.classList.remove('dark');
+            themeToggleHandle.style.transform = 'translateX(0)';
+        }
+
+        themeToggle.addEventListener('click', () => {
+            if (document.documentElement.classList.contains('dark')) {
+                document.documentElement.classList.remove('dark');
+                localStorage.setItem('theme', 'light');
+                themeToggleHandle.style.transform = 'translateX(0)';
+            } else {
+                document.documentElement.classList.add('dark');
+                localStorage.setItem('theme', 'dark');
+                themeToggleHandle.style.transform = 'translateX(28px)';
+            }
+        });
+        // =============== 主题切换功能结束 ===============
+
+        // 公告栏相关函数
+        let map;
+        function showAnnouncementModal() {
+            document.getElementById('announcement-modal').classList.remove('hidden');
+            if (map) {
+                map.dragging.disable();
+                map.touchZoom.disable();
+                map.doubleClickZoom.disable();
+                map.scrollWheelZoom.disable();
+            }
+        }
+
+        function hideAnnouncementModal() {
+            document.getElementById('announcement-modal').classList.add('hidden');
+            if (map) {
+                map.dragging.enable();
+                map.touchZoom.enable();
+                map.doubleClickZoom.enable();
+                map.scrollWheelZoom.enable();
+            }
+        }
+
+        // 省份信息数据
+        const provinceInfo = {
+            "北京市": {
+                "name": "北京市",
+                "capital": "北京",
+                "area": "1.64万平方公里",
+                "population": "2184万",
+                "description": "北京是中国的首都，是全国的政治中心、文化中心、国际交往中心和科技创新中心。",
+            },
+            "天津市": {
+                "name": "天津市",
+                "capital": "天津",
+                "area": "1.19万平方公里",
+                "population": "1364万",
+                "description": "天津是中国四大直辖市之一，北方最大的港口城市，国家中心城市。",
+            },
+            "河北省": {
+                "name": "河北省",
+                "capital": "石家庄",
+                "area": "18.88万平方公里",
+                "population": "7420万",
+                "description": "河北省环抱首都北京，是中国重要的粮棉产区和重工业基地。",
+            },
+            "山西省": {
+                "name": "山西省",
+                "capital": "太原",
+                "area": "15.67万平方公里",
+                "population": "3445.96万",
+                "description": "山西省是中国重要的能源基地，煤炭资源丰富，被誉为'煤海'。",
+            },
+            "辽宁省": {
+                "name": "辽宁省",
+                "capital": "沈阳",
+                "area": "14.8万平方公里",
+                "population": "4259万",
+                "description": "辽宁省是中国东北沿海省份，是中国重要的老工业基地和粮食生产基地。",
+            },
+            "吉林省": {
+                "name": "吉林省",
+                "capital": "长春",
+                "area": "18.74万平方公里",
+                "population": "2317.31万",
+                "description": "吉林省是中国重要的工业基地和商品粮生产基地，拥有丰富的自然资源和独特的冰雪旅游资源。",
+            },
+            "黑龙江省": {
+                "name": "黑龙江省",
+                "capital": "哈尔滨",
+                "area": "47.3万平方千米",
+                "population": "3029万",
+                "description": "地处东北边陲，是我国重要的粮食生产大省，有广袤的黑土地。冬季的冰雪景观，如哈尔滨冰雪大世界闻名遐迩。",
+            },
+            "上海市": {
+                "name": "上海市",
+                "capital": "上海",
+                "area": "6340平方千米",
+                "population": "2480.26万",
+                "description": "中国的经济中心、国际化大都市，有外滩、东方明珠等标志性建筑，展现着现代都市风貌。",
+            },
+            "浙江省": {
+                "name": "浙江省",
+                "capital": "杭州",
+                "area": "10.55万平方千米",
+                "population": "6670万",
+                "description": "风景秀丽，互联网经济发达。杭州西湖、千岛湖等自然景观美不胜收，乌镇等古镇充满江南韵味。",
+            },
+            "安徽省": {
+                "name": "安徽省",
+                "capital": "合肥",
+                "area": "14万平方千米",
+                "population": "6123万",
+                "description": "有“江淮大地”之称，自然风光与人文景观相得益彰，黄山是其著名的旅游名片。",
+            },
+            "福建省": {
+                "name": "福建省",
+                "capital": "福州",
+                "area": "12.4万平方千米",
+                "population": "4193万",
+                "description": "东南沿海省份，海岸线漫长，鼓浪屿、武夷山等景点吸引大量游客，茶文化也源远流长。",
+            },
+            "江西省": {
+                "name": "江西省",
+                "capital": "南昌",
+                "area": "16.69万平方千米",
+                "population": "4502万",
+                "description": "红色革命根据地，有井冈山等红色旅游景点，鄱阳湖是我国最大的淡水湖。",
+            },
+            "山东省": {
+                "name": "山东省",
+                "capital": "济南",
+                "area": "15.8万平方千米",
+                "population": "10080.17万",
+                "description": "经济强省，有“孔孟之乡”的美誉，泰山雄伟壮观，青岛的海滨景色迷人。",
+            },
+            "河南省": {
+                "name": "河南省",
+                "capital": "郑州",
+                "area": "16.7万平方千米",
+                "population": "9785万",
+                "description": "中原大地，历史悠久，是华夏文明的重要发祥地之一，少林寺闻名世界。",
+            },
+            "湖北省": {
+                "name": "湖北省",
+                "capital": "武汉",
+                "area": "18.59万平方千米",
+                "population": "5834万",
+                "description": "有“九省通衢”之称，武汉黄鹤楼、三峡大坝等是著名景点，农业和工业都较为发达。",
+            },
+            "湖南省": {
+                "name": "湖南省",
+                "capital": "长沙",
+                "area": "21.18万平方千米",
+                "population": "6539万",
+                "description": "因大部分区域处于洞庭湖以南而得名，张家界的奇峰异石、凤凰古城独具魅力。",
+            },
+            "广东省": {
+                "name": "广东省",
+                "capital": "广州",
+                "area": "17.97万平方千米",
+                "population": "12800万",
+                "description": "经济第一大省，开放程度高，广州塔、深圳的现代化都市景观以及众多美食吸引着各地游客。",
+            },
+            "海南省": {
+                "name": "海南省",
+                "capital": "海口",
+                "area": "3.54万平方千米",
+                "population": "1048万",
+                "description": "我国唯一的热带海岛省份，三亚的海滨风光闻名遐迩，是度假旅游胜地。",
+            },
+            "四川省": {
+                "name": "四川省",
+                "capital": "成都",
+                "area": "48.6万平方千米",
+                "population": "8364万",
+                "description": "地处西南，有九寨沟、峨眉山等美景，还是大熊猫的故乡，美食文化丰富，如火锅、川菜等。",
+            },
+            "贵州省": {
+                "name": "贵州省",
+                "capital": "贵阳",
+                "area": "17.6万平方千米",
+                "population": "3860万",
+                "description": "多山地，自然风光独特，黄果树瀑布气势磅礴，还有浓郁的少数民族风情。",
+            },
+            "云南省": {
+                "name": "云南省",
+                "capital": "昆明",
+                "area": "39万平方千米",
+                "population": "4655万",
+                "description": "动植物王国，自然景观多样，大理洱海、丽江古城充满浪漫与诗意，少数民族文化多姿多彩。",
+            },
+            "陕西省": {
+                "name": "陕西省",
+                "capital": "西安",
+                "area": "20.58万平方千米",
+                "population": "3953万",
+                "description": "历史文化大省，西安作为十三朝古都，兵马俑、古城墙见证着历史的辉煌。",
+            },
+            "甘肃省": {
+                "name": "甘肃省",
+                "capital": "兰州",
+                "area": "45.37万平方千米",
+                "population": "2388万",
+                "description": "地处西北，河西走廊贯穿其中，敦煌莫高窟是艺术瑰宝，还有独特的大漠风光。",
+            },
+            "青海省": {
+                "name": "青海省",
+                "capital": "西宁",
+                "area": "72.1万平方千米",
+                "population": "593万",
+                "description": "有“世界屋脊”的美称，青海湖是我国最大的内陆咸水湖，可可西里自然保护区是野生动物的天堂。",
+            },
+            "内蒙古自治区": {
+                "name": "内蒙古自治区",
+                "capital": "呼和浩特",
+                "area": "118.3万平方千米",
+                "population": "2458.34万",
+                "description": "广袤的草原是其特色，有成群的牛羊和独特的蒙古族文化，呼伦贝尔大草原闻名世界。",
+            },
+            "广西壮族自治区": {
+                "name": "广西壮族自治区",
+                "capital": "南宁",
+                "area": "23.67万平方千米",
+                "population": "5013万",
+                "description": "山水如画，桂林山水甲天下，还有浓郁的壮族风情和美丽的北部湾海滨风光。",
+            },
+            "西藏自治区": {
+                "name": "西藏自治区",
+                "capital": "拉萨",
+                "area": "122.84万平方千米",
+                "population": "370万",
+                "description": "世界屋脊，有壮丽的雪山、神秘的宗教文化，布达拉宫是其标志性建筑。",
+            },
+            "宁夏回族自治区": {
+                "name": "宁夏回族自治区",
+                "capital": "银川",
+                "area": "6.64万平方千米",
+                "population": "729万",
+                "description": "有独特的回族文化，沙湖、沙坡头融合了沙漠与水域景观，别具一格。",
+            },
+            "新疆维吾尔自治区": {
+                "name": "新疆维吾尔自治区",
+                "capital": "乌鲁木齐",
+                "area": "166万平方千米",
+                "population": "2585万",
+                "description": "面积最大的自治区，自然风光壮美，有天山天池、喀纳斯湖，还有丰富的瓜果资源。",
+            },
+            "重庆市": {
+                "name": "重庆市",
+                "capital": "重庆",
+                "area": "8.2万平方千米",
+                "population": "3190.47万",
+                "description": "山城重庆，有独特的立体交通和夜景，火锅文化盛行，洪崖洞是热门打卡地。",
+            },
+            "江苏省": {
+                "name": "江苏省",
+                "capital": "南京",
+                "area": "10.72万平方千米",
+                "population": "8526万",
+                "description": "经济发达，文化底蕴深厚，有苏州园林、南京夫子庙等人文景观，还有美丽的水乡风光。",
+            },
+            "香港特别行政区": {
+                "name": "香港特别行政区",
+                "area": "陆地总面积1113.76平方公里，海域面积1641.21平方公里",
+                "population": "741.3万",
+                "description": "位于中国东南部，由香港岛、九龙、新界和周围262个岛屿组成。是国际金融、航运和贸易中心，粤港澳大湾区中心城市之一，有‘东方好莱坞’‘东方之珠’‘美食天堂’‘购物天堂’等美誉。",
+            },
+            "澳门特别行政区": {
+                "name": "澳门特别行政区",
+                "area": "陆地面积32.9平方公里",
+                "population": "68.83万",
+                "description": "位于中国南部珠江口西侧，是中国内地与中国南海的水陆交汇处。是国际自由港，以博彩业和旅游业为支柱产业，有大三巴牌坊等著名景点，融合了中西方文化特色。",
+            },
+            "台湾省": {
+                "name": "台湾省",
+                "capital": "台北",
+                "area": "3.6万平方千米",
+                "population": "2340.02万",
+                "description": "中国省级行政区，由中国第一大岛台湾岛与兰屿、绿岛、钓鱼岛等附属岛屿和澎湖列岛组成。有阿里山、日月潭等自然美景，以及丰富的人文景观，是中国不可分割的一部分。",
+            },
+            "南海诸岛": {
+                "name": "南海诸岛",
+                "area": "约210万平方千米",
+                "description": "南海诸岛是中国南海中许多岛礁的总称，拥有丰富的海洋资源和独特的海洋生态系统。"
+            },
+            "十段线": {
+                "name": "十段线",
+                "description": "十段线是中国在南海海域国界线的一种表示形式，体现了中国对南海相关海域及其岛屿的主权和权益。"
+            }
+        };
+
+        // 名称映射表：简化名称 -> 全称
+        const nameMap = {
+            "北京": "北京市",
+            "天津": "天津市",
+            "河北": "河北省",
+            "山西": "山西省",
+            "辽宁": "辽宁省",
+            "吉林": "吉林省",
+            "黑龙江": "黑龙江省",
+            "上海": "上海市",
+            "江苏": "江苏省",
+            "浙江": "浙江省",
+            "安徽": "安徽省",
+            "福建": "福建省",
+            "江西": "江西省",
+            "山东": "山东省",
+            "河南": "河南省",
+            "湖北": "湖北省",
+            "湖南": "湖南省",
+            "广东": "广东省",
+            "海南": "海南省",
+            "四川": "四川省",
+            "贵州": "贵州省",
+            "云南": "云南省",
+            "陕西": "陕西省",
+            "甘肃": "甘肃省",
+            "青海": "青海省",
+            "内蒙古": "内蒙古自治区",
+            "广西": "广西壮族自治区",
+            "西藏": "西藏自治区",
+            "宁夏": "宁夏回族自治区",
+            "新疆": "新疆维吾尔自治区",
+            "重庆": "重庆市",
+            "香港": "香港特别行政区",
+            "澳门": "澳门特别行政区",
+            "台湾": "台湾省",
+            "南海诸岛": "南海诸岛",
+            "十段线": "十段线"
+        };
+
+        // 更健壮的省份名称匹配函数
+        function getProvinceName(props) {
+            const possibleNames = [
+                props.name,
+                props.NAME,
+                props.name_cn,
+                props.name_zh,
+                props.name_en,
+                props.NAME_CHN
+            ];
+
+            const matchedName = possibleNames.find(name => name !== undefined && name !== null);
+
+            if (matchedName && nameMap[matchedName]) {
+                return nameMap[matchedName];
+            }
+
+            return matchedName || null;
+        }
+
+        // 检查Leaflet是否加载成功
+        if (typeof L === 'undefined') {
+            document.getElementById('province-info').innerHTML = `
+                <div class="text-red-500 font-semibold">Leaflet地图库加载失败</div>
+                <p class="text-gray-600">请尝试以下操作:</p>
+                <ul class="list-disc list-inside text-gray-600 mt-2">
+                    <li>刷新页面</li>
+                    <li>检查网络连接</li>
+                    <li>清除浏览器缓存</li>
+                    <li>尝试使用其他浏览器</li>
+                </ul>
+            `;
+        } else {
+            // 初始化地图
+            map = L.map('map').setView([35.86, 104.19], 4);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+
+            function style(feature) {
+                return {
+                    fillColor: '#3B82F6',
+                    weight: 2,
+                    opacity: 1,
+                    color: 'white',
+                    dashArray: '3',
+                    fillOpacity: 0.7
+                };
+            }
+
+            // 加载TopoJSON数据
+           fetch('china.topo.json')
+               .then(response => {
+                    if (!response.ok) throw new Error(`HTTP错误: ${response.status}`);
+                    return response.json();
+                })
+               .then(topology => {
+                    if (typeof topojson === 'undefined') {
+                        throw new Error('TopoJSON解析库加载失败');
+                    }
+
+                    const objectNames = Object.keys(topology.objects);
+                    const objectName = objectNames.find(name =>
+                        name.toLowerCase().includes('province') ||
+                        name.toLowerCase().includes('china')
+                    ) || objectNames[0];
+
+                    if (!objectName) {
+                        throw new Error('找不到有效的地理数据对象');
+                    }
+
+                    const geojson = topojson.feature(topology, topology.objects[objectName]);
+
+                    if (!geojson || !geojson.features || geojson.features.length === 0) {
+                        throw new Error('转换后的GeoJSON数据为空或格式不正确');
+                    }
+
+                    const geojsonLayer = L.geoJSON(geojson, {
+                        style: style,
+                        onEachFeature: function(feature, layer) {
+                            layer.on({
+                                mouseover: function(e) {
+                                    const layer = e.target;
+                                    layer.setStyle({
+                                        weight: 5,
+                                        color: '#666',
+                                        dashArray: '',
+                                        fillOpacity: 0.9
+                                    });
+                                    const props = layer.feature.properties;
+                                    const provinceName = getProvinceName(props);
+
+                                    if (provinceName) {
+                                        let html = `
+                                            <div class="space-y-2">
+                                                <h3 class="text-xl font-bold text-primary dark:text-primary-dark">${provinceName}</h3>
+                                        `;
+
+                                        if (provinceName !== '十段线' && provinceInfo[provinceName]?.area) {
+                                            html += `
+                                                <p class="flex items-center"><i class="fa fa-map-o mr-2 text-gray-500 dark:text-gray-400"></i> 面积: ${provinceInfo[provinceName].area}</p>
+                                            `;
+                                        }
+
+                                        if (provinceName !== '南海诸岛' && provinceName !== '十段线') {
+                                            if (provinceInfo[provinceName]?.capital) {
+                                                html += `
+                                                    <p class="flex items-center"><i class="fa fa-building-o mr-2 text-gray-500 dark:text-gray-400"></i> 省会: ${provinceInfo[provinceName].capital}</p>
+                                                `;
+                                            }
+                                            if (provinceInfo[provinceName]?.population) {
+                                                html += `
+                                                    <p class="flex items-center"><i class="fa fa-users mr-2 text-gray-500 dark:text-gray-400"></i> 人口: ${provinceInfo[provinceName].population}</p>
+                                                `;
+                                            }
+                                        }
+
+                                        if (provinceInfo[provinceName]?.description) {
+                                            html += `
+                                                <div class="mt-4">
+                                                    <h4 class="font-semibold text-gray-700 dark:text-gray-300 mb-1">简介:</h4>
+                                                    <p class="text-gray-600 dark:text-gray-300">${provinceInfo[provinceName].description}</p>
+                                                </div>
+                                            `;
+                                        }
+
+                                        html += `</div>`;
+                                        document.getElementById('province-info').innerHTML = html;
+                                    } else {
+                                        document.getElementById('province-info').innerHTML = `
+                                            <div class="text-yellow-500 font-semibold">无法识别省份名称</div>
+                                            <p class="text-gray-600">请尝试点击其他省份</p>
+                                        `;
+                                    }
+                                },
+                                mouseout: function(e) {
+                                    geojsonLayer.resetStyle(e.target);
+                                },
+                                click: function(e) {
+                                    map.fitBounds(e.target.getBounds());
+                                }
+                            });
+                        }
+                    }).addTo(map);
+
+                    map.fitBounds(geojsonLayer.getBounds());
+                })
+               .catch(error => {
+                    console.error('地图数据加载失败:', error);
+                    document.getElementById('province-info').innerHTML = `
+                        <div class="text-red-500 font-semibold">地图数据加载失败</div>
+                        <p class="text-gray-600">${error.message}</p>
+                        <p class="text-gray-600">请检查网络连接或刷新页面</p>
+                    `;
+                });
+        }
+
+        // 初始化公告栏动画
+        // 在DOMContentLoaded事件中添加
+        document.addEventListener('DOMContentLoaded', function() {
+            // 确保公告文本可见
+            const marquee = document.querySelector('.animate-marquee');
+            if (marquee) {
+                // 移除任何可能隐藏文本的样式
+                marquee.style.opacity = '1';
+                marquee.style.visibility = 'visible';
+                marquee.style.position = 'static';
+                marquee.style.transform = 'none';
+                marquee.style.paddingLeft = '0';
+                marquee.style.animation = 'marquee 10s linear infinite';
+            }
+        });
+    </script>
+
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .content-auto {
+                content-visibility: auto;
+            }
+            /* 修复公告栏动画 */
+           /* 替换原有的动画样式 */
+           /* 公告栏动画 */
+            .animate-marquee {
+                display: inline-block;
+                padding-left: 100%; /* 初始位置在右侧 */
+                animation: marquee 10s linear infinite;
+                white-space: nowrap;
+            }
+
+            @keyframes marquee {
+                0% { transform: translateX(0); }
+                100% { transform: translateX(-100%); }
+            }
+
+            /* 深色模式下的地图样式 */
+            .dark .leaflet-container {
+                background-color: #1a202c !important;
+            }
+            .dark .leaflet-bar a {
+                background-color: #2d3748;
+                color: #e2e8f0;
+                border-bottom: 1px solid #4a5568;
+            }
+            .dark .leaflet-bar a:hover {
+                background-color: #4a5568;
+            }
+            .dark .leaflet-popup-content-wrapper {
+                background-color: #2d3748;
+                color: #e2e8f0;
+            }
+            .dark .leaflet-popup-tip {
+                background-color: #2d3748;
+            }
+            .dark .leaflet-control-attribution {
+                background-color: rgba(45, 55, 72, 0.7);
+                color: #cbd5e0;
+            }
+
+            /* 主题切换按钮样式 */
+            #theme-toggle {
+                transition: background-color 0.3s ease;
+            }
+            #theme-toggle-handle {
+                transition: transform 0.3s ease, background-color 0.3s ease;
+            }
+
+            /* 弹窗样式 */
+            #announcement-modal {
+                z-index: 1000;
+                pointer-events: auto;
+            }
+            #announcement-modal.hidden {
+                pointer-events: none;
+            }
+
+            /* 深色模式下的滚动条样式 */
+            .dark #info-panel::-webkit-scrollbar {
+                width: 8px;
+            }
+            .dark #info-panel::-webkit-scrollbar-track {
+                background: #374151;
+            }
+            .dark #info-panel::-webkit-scrollbar-thumb {
+                background: #4b5563;
+                border-radius: 4px;
+            }
+        }
+    </style>
+</body>
+</html>
